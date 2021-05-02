@@ -1,0 +1,11 @@
+{
+  "categories": [
+    "ASIC & FPGA"
+  ],
+  "tags": [
+    "verilog",
+    "fpga",
+    "dependencies-handling",
+    "ip-core"
+  ]
+}
