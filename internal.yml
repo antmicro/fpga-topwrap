@@ -1,0 +1,13 @@
+internal-check:
+  image: debian:bookworm
+  tags: ['ace-x86_64']
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    VERIFY_REGEXPS: "dev\\.antmicro"
+  script:
+    - apt update
+    - apt install -y python3-pip python3-venv python3 git wget
+    - python3 -m venv venv
+    - source venv/bin/activate
+    - pip3 install git+https://gitlab-ci-token:${CI_JOB_TOKEN}@dev.antmicro.com/git/repositories/fpga-team-utilities.git
+    - check_leaks . ${VERIFY_REGEXPS}
