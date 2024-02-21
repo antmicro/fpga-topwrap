@@ -3,17 +3,23 @@
 
 stages:
   - test
-  - build
-  - deploy
+  - examples
+  - build_docs
+  - deploy_docs
 
-image: debian:bookworm
+variables:
+  DEBIAN_FRONTEND: noninteractive
 
 lint:
   stage: test
   tags: ['ace-x86_64']
-  before_script: &BeforeScript
+  image: debian:bookworm
+  before_script:
     - apt-get update -qq
-    - apt-get install -y --no-install-recommends git python3-pip python3-venv
+    - apt-get install -y --no-install-recommends
+        git
+        python3-pip
+        python3-venv
     - python3 -m venv venv
     - source venv/bin/activate
     - python3 -m pip install -U pip wheel setuptools
@@ -21,41 +27,86 @@ lint:
     - pip install ".[lint]"
     - nox -s isort_check black_check flake8
 
-pytest:
-  stage: test
+.generate_example:
+  stage: examples
   tags: ['ace-x86_64']
+  image: debian:bookworm
   variables:
     GIT_SUBMODULE_STRATEGY: normal
   before_script:
     - apt-get update -qq
-    - apt-get install -y --no-install-recommends wget git python3-dev python3-venv make ninja-build gcc-riscv64-unknown-elf bsdextrautils verilator
-    - mkdir -p miniconda3
-    - wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda3/miniconda.sh
-    - bash miniconda3/miniconda.sh -b -u -p miniconda3
-    - rm -rf miniconda3/miniconda.sh
-    - source miniconda3/bin/activate
-    - conda create -n venv python=3.9
-    - conda activate venv
-    - conda install -c conda-forge gcc=12.1.0
-  script:
-    - apt-get install -y --no-install-recommends git python3-dev
+    - apt-get install -y --no-install-recommends
+        git
+        python3-dev
+        python3-venv
+        python3-pip
+    - python3 -m venv venv
+    - source venv/bin/activate
     - python3 -m pip install git+https://github.com/antmicro/tuttest
     - tuttest README.md | bash -
-    - pip install ".[tests]"
-    - nox -s tests_with_report
-  artifacts:
-    paths:
-      - cov_html
+  script:
+    - cd examples/$EXAMPLE
+    - tuttest README.md install-deps,generate | bash -
 
-docs-verify:
+tests:
   stage: test
   tags: ['ace-x86_64']
+  image: debian:bookworm
+  variables:
+    GIT_SUBMODULE_STRATEGY: normal
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends
+        curl
+        wget
+        git
+        python3-dev
+        python3-venv
+        python3-pip
+        make
+        meson
+        ninja-build
+        gcc-riscv64-unknown-elf
+        bsdextrautils
+        verilator
+        libssl-dev
+        libreadline-dev
+        libffi-dev
+        libbz2-dev
+        libncurses-dev
+        libsqlite3-dev
+        liblzma-dev
+    - python3 -m venv venv
+    - source venv/bin/activate
+    - python3 -m pip install nox
+    - python3 -m pip install git+https://github.com/antmicro/tuttest
+    - tuttest README.md | bash -
   script:
-    - eval ${VERIFY_SCRIPT}
+    - nox -s tests_with_reports_in_env
 
-docs-build:
+example_hdmi:
+  extends: .generate_example
+  variables:
+    EXAMPLE: hdmi
+
+example_inout:
+  extends: .generate_example
+  variables:
+    EXAMPLE: inout
+
+example_pwm:
+  extends: .generate_example
+  variables:
+    EXAMPLE: pwm
+
+include:
+  - project: 'repositories/topwrap'
+    ref: internal_ci_yaml
+    file: '/internal.yml'
+
+build_docs:
   image: $CI_DOCS_DOCKER_IMAGE
-  stage: build
+  stage: build_docs
   tags: ['ace-x86_64']
   before_script:
     - pip3 install -r docs/requirements.txt
@@ -64,20 +115,22 @@ docs-build:
     - echo -en "\nhtml_js_files = [ '$ANNOTANT' ]" >> source/conf.py
     - make html latexpdf
     - cp build/latex/*.pdf build/html/
-    - cp -r ../cov_html build/html/cov
     - tar cf ../$CI_DOCS_ARCHIVE -C build/html/ .
   artifacts:
     paths:
       - docs/build
       - $CI_DOCS_ARCHIVE
 
-docs-deploy:
+deploy_docs:
+  image: $CI_DOCS_DOCKER_IMAGE
   variables:
     GIT_STRATEGY: none
-  dependencies: [ docs-build ]
-  stage: deploy
+  dependencies:
+    - build_docs
+  stage: deploy_docs
   tags: ['docs']
   script: echo 'Deploying docs'
   artifacts:
     paths:
       - $CI_DOCS_ARCHIVE
+

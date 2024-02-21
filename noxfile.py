@@ -1,7 +1,14 @@
 # Copyright (c) 2023-2024 Antmicro <www.antmicro.com>
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import shutil
+import subprocess
+import sys
+
 import nox
+
+PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
 
 @nox.session()
@@ -50,13 +57,90 @@ def black_check(session):
 # https://github.com/pytest-dev/pytest-cov/issues/388
 
 
-@nox.session
+@nox.session(python=PYTHON_VERSIONS)
 def tests(session: nox.Session) -> None:
     session.install("-e", ".[tests,topwrap-parse]")
-    session.run("pytest", "--cov=topwrap", "tests")
+    session.run("pytest", "-rs", "--cov=topwrap", "tests")
+
+
+@nox.session(python=PYTHON_VERSIONS)
+def tests_with_report(session: nox.Session) -> None:
+    session.install("-e", ".[tests,topwrap-parse]")
+    session.run("pytest", "-rs", "--cov-report", "html:cov_html", "--cov=topwrap", "tests")
+
+
+def prepare_pyenv(session: nox.Session) -> dict:
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    pyenv_dir = f"{project_dir}/build/.pyenv"
+    pyenv_bin = f"{os.path.join(pyenv_dir, 'bin')}"
+    pyenv_shims = f"{os.path.join(pyenv_dir, 'shims')}"
+    path = f"{pyenv_bin}:{pyenv_shims}:{os.getenv('PATH')}"
+
+    env = os.environ.copy()
+    env["PATH"] = path
+    env["PYENV_ROOT"] = pyenv_dir
+
+    # Install Pyenv
+    if not shutil.which("pyenv", path=path):
+        p = subprocess.run(
+            "curl https://pyenv.run | bash",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            shell=True,
+            env=env,
+        )
+        session.log(p.stdout.strip("\n"))
+
+        if p.returncode:
+            session.error()
+
+    # Install required Python versions if these don't exist
+    for ver in PYTHON_VERSIONS:
+        if not shutil.which(f"python{ver}", path=path):
+            session.log(f"Installing Python {ver}")
+            p = subprocess.run(
+                f"pyenv install {ver}",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                shell=True,
+                env=env,
+            )
+            session.log(p.stdout.strip("\n"))
+
+    # Detect which versions are provided by Pyenv
+    pythons_in_pyenv = ""
+    for ver in PYTHON_VERSIONS:
+        if shutil.which(f"python{ver}", path=pyenv_shims):
+            pythons_in_pyenv += f"{ver} "
+
+    # Allow using Pythons from Pyenv
+    if pythons_in_pyenv:
+        session.log(f"Configuring Pythons from Pyenv, versions: {pythons_in_pyenv}")
+        p = subprocess.run(
+            f"pyenv global {pythons_in_pyenv}",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            shell=True,
+            env=env,
+        )
+        session.log(p.stdout.strip("\n"))
+
+        if p.returncode:
+            session.error()
+
+    return env
 
 
 @nox.session
-def tests_with_report(session: nox.Session) -> None:
-    session.install("-e", ".[tests,topwrap-parse]")
-    session.run("pytest", "--cov-report", "html:cov_html", "--cov=topwrap", "tests")
+def tests_in_env(session: nox.Session) -> None:
+    env = prepare_pyenv(session)
+    session.run("nox", "-s", "tests", external=True, env=env)
+
+
+@nox.session
+def tests_with_reports_in_env(session: nox.Session) -> None:
+    env = prepare_pyenv(session)
+    session.run("nox", "-s", "tests_with_report", external=True, env=env)
