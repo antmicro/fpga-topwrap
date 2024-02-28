@@ -70,30 +70,24 @@ def tests_with_report(session: nox.Session) -> None:
 
 
 def prepare_pyenv(session: nox.Session) -> dict:
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    pyenv_dir = f"{project_dir}/build/.pyenv"
-    pyenv_bin = f"{os.path.join(pyenv_dir, 'bin')}"
-    pyenv_shims = f"{os.path.join(pyenv_dir, 'shims')}"
-    path = f"{pyenv_bin}:{pyenv_shims}:{os.getenv('PATH')}"
-
     env = os.environ.copy()
+    path = env.get("PATH")
+
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    env["PYENV_ROOT"] = env.get("PYENV_ROOT", f"{project_dir}/.nox/pyenv")
+
+    pyenv_bin = f"{os.path.join(env['PYENV_ROOT'], 'bin')}"
+    pyenv_shims = f"{os.path.join(env['PYENV_ROOT'], 'shims')}"
+    path = f"{pyenv_bin}:{pyenv_shims}:{path}"
     env["PATH"] = path
-    env["PYENV_ROOT"] = pyenv_dir
 
     # Install Pyenv
     if not shutil.which("pyenv", path=path):
-        p = subprocess.run(
-            "curl https://pyenv.run | bash",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            shell=True,
-            env=env,
+        session.error(
+            "\n'pyenv' command not found, you can install it by executing:"
+            "\n    curl https://pyenv.run | bash"
+            "\nSee https://github.com/pyenv/pyenv?tab=readme-ov-file#installation for more information"
         )
-        session.log(p.stdout.strip("\n"))
-
-        if p.returncode:
-            session.error()
 
     # Install required Python versions if these don't exist
     for ver in PYTHON_VERSIONS:
