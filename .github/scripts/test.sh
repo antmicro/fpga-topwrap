@@ -3,7 +3,7 @@
 set -e
 
 ROOT_DIR="$(dirname "${BASH_SOURCE[0]}")/../.."
-EXAMPLES="$(ls "$ROOT_DIR"/examples)"
+EXAMPLES=(hdmi inout pwm)
 
 begin_command_group() {
 	if [[ -n "${GITHUB_WORKFLOW:-}" ]]; then
@@ -117,9 +117,9 @@ generate_examples() {
     install_python_packages "examples"
     install_topwrap
 
-    for EXAMPLE in $EXAMPLES; do
+    for EXAMPLE in "${EXAMPLES[@]}"; do
         begin_command_group "Generate $EXAMPLE example"
-        pushd examples/"$EXAMPLE"
+        pushd "$ROOT_DIR"/examples/"$EXAMPLE"
         tuttest README.md install-deps,generate | bash -
         popd
         end_command_group
