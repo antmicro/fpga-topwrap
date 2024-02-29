@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 ROOT_DIR="$(dirname "${BASH_SOURCE[0]}")/../.."
 EXAMPLES=(hdmi inout pwm)
@@ -19,38 +19,13 @@ end_command_group() {
 	fi
 }
 
-install_system_packages() {
+install_common_system_packages() {
     begin_command_group "Install system packages"
     apt-get update -qq
     apt-get install -y --no-install-recommends \
         git \
         python3-pip \
         python3-venv
-
-    if [[ "$1" == "examples" ]]; then
-        apt-get install -y --no-install-recommends \
-            python3-dev
-    fi
-
-    if [[ "$1" == "tests" ]]; then
-        apt-get install -y --no-install-recommends \
-            curl \
-            wget \
-            python3-dev \
-            make \
-            meson \
-            ninja-build \
-            gcc-riscv64-unknown-elf \
-            bsdextrautils \
-            verilator \
-            libssl-dev \
-            libreadline-dev \
-            libffi-dev \
-            libbz2-dev \
-            libncurses-dev \
-            libsqlite3-dev \
-            liblzma-dev
-    fi
     end_command_group
 }
 
@@ -71,18 +46,6 @@ enter_venv() {
     end_command_group
 }
 
-install_python_packages() {
-    begin_command_group "Install Python packages"
-    if [[ "$1" == "lint" || "$1" == "tests" ]]; then
-        pip install ".[$1]"
-    fi
-
-    if [[ "$1" == "tests" || "$1" == "examples" ]]; then
-        pip install git+https://github.com/antmicro/tuttest
-    fi
-    end_command_group
-}
-
 install_topwrap() {
     begin_command_group "Install Topwrap"
     tuttest README.md | bash -
@@ -90,9 +53,12 @@ install_topwrap() {
 }
 
 run_lint() {
-    install_system_packages
+    install_common_system_packages
     enter_venv
-    install_python_packages "lint"
+
+    begin_command_group "Install python packages for lint"
+    pip install ".[lint]"
+    end_command_group
 
     begin_command_group "Run lint checks"
     nox -s isort_check black_check flake8
@@ -100,21 +66,54 @@ run_lint() {
 }
 
 run_tests() {
-    install_system_packages "tests"
+    install_common_system_packages
+
+    begin_command_group "Install system packages for tests"
+    apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        python3-dev \
+        make \
+        meson \
+        ninja-build \
+        gcc-riscv64-unknown-elf \
+        bsdextrautils \
+        verilator \
+        libssl-dev \
+        libreadline-dev \
+        libffi-dev \
+        libbz2-dev \
+        libncurses-dev \
+        libsqlite3-dev \
+        liblzma-dev
+    end_command_group
+
     install_pyenv
     enter_venv
-    install_python_packages "tests"
+
+    begin_command_group "Install python packages for tests"
+    pip install ".[tests]"
+    pip install git+https://github.com/antmicro/tuttest
+    end_command_group
+
     install_topwrap
 
     begin_command_group "Run Python tests"
-    nox -s tests_with_reports_in_env
+    nox -s tests_in_env
     end_command_group
 }
 
 generate_examples() {
-    install_system_packages "examples"
+    install_common_system_packages
+    begin_command_group "Install system packages for examples"
+    apt-get install -y --no-install-recommends python3-dev
+    end_command_group
     enter_venv
-    install_python_packages "examples"
+
+    begin_command_group "Install python packages for examples"
+    pip install git+https://github.com/antmicro/tuttest
+    end_command_group
+
     install_topwrap
 
     for EXAMPLE in "${EXAMPLES[@]}"; do

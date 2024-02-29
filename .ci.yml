@@ -24,6 +24,9 @@ examples:
     GIT_SUBMODULE_STRATEGY: normal
   script:
     - ./.github/scripts/test.sh examples
+  artifacts:
+    paths:
+      - examples/**/build
 
 tests:
   stage: test

@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path, PurePath
 
 import nox
 
@@ -60,12 +61,6 @@ def black_check(session):
 @nox.session(python=PYTHON_VERSIONS)
 def tests(session: nox.Session) -> None:
     session.install("-e", ".[tests,topwrap-parse]")
-    session.run("pytest", "-rs", "--cov=topwrap", "tests")
-
-
-@nox.session(python=PYTHON_VERSIONS)
-def tests_with_report(session: nox.Session) -> None:
-    session.install("-e", ".[tests,topwrap-parse]")
     session.run("pytest", "-rs", "--cov-report", "html:cov_html", "--cov=topwrap", "tests")
 
 
@@ -73,11 +68,11 @@ def prepare_pyenv(session: nox.Session) -> dict:
     env = os.environ.copy()
     path = env.get("PATH")
 
-    project_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = Path(__file__).absolute().parent
     env["PYENV_ROOT"] = env.get("PYENV_ROOT", f"{project_dir}/.nox/pyenv")
 
-    pyenv_bin = f"{os.path.join(env['PYENV_ROOT'], 'bin')}"
-    pyenv_shims = f"{os.path.join(env['PYENV_ROOT'], 'shims')}"
+    pyenv_bin = f"{PurePath(Path(env['PYENV_ROOT']), Path('bin'))}"
+    pyenv_shims = f"{PurePath(Path(env['PYENV_ROOT']), Path('shims'))}"
     path = f"{pyenv_bin}:{pyenv_shims}:{path}"
     env["PATH"] = path
 
@@ -132,9 +127,3 @@ def prepare_pyenv(session: nox.Session) -> dict:
 def tests_in_env(session: nox.Session) -> None:
     env = prepare_pyenv(session)
     session.run("nox", "-s", "tests", external=True, env=env)
-
-
-@nox.session
-def tests_with_reports_in_env(session: nox.Session) -> None:
-    env = prepare_pyenv(session)
-    session.run("nox", "-s", "tests_with_report", external=True, env=env)

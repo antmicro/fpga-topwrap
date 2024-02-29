@@ -70,3 +70,9 @@ jobs:
       - name: Generate Topwrap examples
         run: |
           ./.github/scripts/test.sh examples
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: examples
+          path: examples/**/build
