@@ -1,5 +1,6 @@
 #!/bin/bash
 
+PS4="\033[1m\033[38;5;45m+ \033[0m"
 set -ex
 
 ROOT_DIR="$(dirname "${BASH_SOURCE[0]}")/../.."
