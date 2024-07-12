@@ -9,5 +9,9 @@ internal-check:
     - apt install -y python3-pip python3-venv python3 git wget
     - python3 -m venv venv
     - source venv/bin/activate
-    - pip3 install git+https://gitlab-ci-token:${CI_JOB_TOKEN}@dev.antmicro.com/git/repositories/fpga-team-utilities.git
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@dev.antmicro.com/git/repositories/fpga-team-utilities.git
+    - pushd fpga-team-utilities
+    - pip3 install .
+    - popd
+    - rm -rf fpga-team-utilities
     - check_leaks . ${VERIFY_REGEXPS}
