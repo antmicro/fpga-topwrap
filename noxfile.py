@@ -90,3 +90,18 @@ def prepare_pyenv(session: nox.Session) -> dict:
 def tests_in_env(session: nox.Session) -> None:
     env = prepare_pyenv(session)
     session.run("nox", "-s", "tests", external=True, env=env)
+
+
+@nox.session
+def doc_gen(session) -> None:
+    session.install(".")
+    session.install("-r", "docs/requirements.txt")
+    session.run("make", "-C", "docs", "html", external=True)
+    session.run("make", "-C", "docs", "latexpdf", external=True)
+
+    # session.cd("docs")
+    # latex_dir = "build/latex"
+    # latex_files = Path(latex_dir).glob("*.pdf")
+    # for file in latex_files:
+    #    session.run("cp", file, "build/html", external=True)
+    session.run("cp", "docs/build/latex/topwrap.pdf", "docs/build/html", external=True)
