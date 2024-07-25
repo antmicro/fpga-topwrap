@@ -137,6 +137,20 @@ generate_examples() {
     done
 }
 
+
+generate_docs() {
+    install_common_system_packages
+    begin_command_group "Install system packages for doc generation"
+    log_cmd apt-get install -y texlive-full make
+    end_command_group
+    install_nox
+
+    begin_command_group "Generating documentation"
+    log_cmd nox -s doc_gen
+    end_command_group
+}
+
+
 package_cores() {
     install_common_system_packages
     install_topwrap_system_deps
@@ -179,7 +193,10 @@ package_cores)
 package_dist)
     package_dist
     ;;
+docs)
+    generate_docs
+    ;;
 *)
-    echo "Usage: $0 {lint|tests|examples|package_cores|package_dist}"
+    echo "Usage: $0 {lint|tests|examples|package_cores|package_dist|docs}"
     ;;
 esac
