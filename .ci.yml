@@ -47,6 +47,13 @@ package_cores:
     paths:
       - core_repo/**
 
+pyright_check:
+  stage: test
+  image: debian:bookworm
+  script:
+    - ./.github/scripts/ci.sh pyright_check
+  allow_failure: true
+
 build_docs:
   image: debian:bookworm
   stage: build_docs

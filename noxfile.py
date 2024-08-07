@@ -1,11 +1,15 @@
 # Copyright (c) 2023-2024 Antmicro <www.antmicro.com>
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import os
 import shutil
+from collections import defaultdict
 from pathlib import Path, PurePath
+from tempfile import TemporaryDirectory, TemporaryFile
 
 import nox
+from nox.command import CommandFailed
 
 PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
@@ -123,3 +127,87 @@ def doc_gen(session) -> None:
     session.run("make", "-C", "docs", "html", external=True)
     session.run("make", "-C", "docs", "latexpdf", external=True)
     session.run("cp", "docs/build/latex/topwrap.pdf", "docs/build/html", external=True)
+
+
+@nox.session
+def pyright_check(session: nox.Session) -> None:
+    session.install(".[topwrap-parse]")
+    from prettytable import PrettyTable
+
+    simple = "compare" not in session.posargs
+
+    # counting down errors on branch
+    errortypes = defaultdict(int)
+    errorfiles = defaultdict(int)
+    errortypes_main = defaultdict(int)
+    errorfiles_main = defaultdict(int)
+    with TemporaryFile() as f:
+        session.run("pyright", "--outputjson", stdout=f, success_codes=[0, 1], external=True)
+        f.seek(0)
+        errors_data = json.load(f)
+        for errno in errors_data["generalDiagnostics"]:
+            errortypes[errno["rule"]] += 1
+            errorfiles[str(Path(errno["file"]).relative_to(Path(".").resolve()))] += 1
+
+    if not simple:
+        # copy pyproject to use same rules for main check
+        with open("pyproject.toml") as f:
+            pyproject_backup = f.read()
+
+        with TemporaryDirectory() as dir:
+            print(f"created temp dir {dir}")
+
+            def copydir(target: Path, source: Path) -> None:
+                for child in source.iterdir():
+                    if child.is_dir():
+                        try:
+                            (target / (child.stem)).mkdir()
+                        except Exception:
+                            print(f"duplicate copy of dir {target / (child.stem)}")
+                        copydir(target / (child.stem), child)
+                    else:
+                        with open(child, "rb") as f:
+                            file = f.read()
+                        with open(target / (child.name), "wb") as f2:
+                            f2.write(file)
+
+            # copy into temp dir and go into it
+            copydir(Path(dir), Path("."))
+            with session.chdir(Path(dir)):
+                # switch to main and replace pyprojest
+                session.run("git", "switch", "main", "--force", external=True)
+                session.run("rm", "pyproject.toml", external=True)
+                with open("pyproject.toml", "w") as f:
+                    f.write(pyproject_backup)
+
+                # counting down errors on main
+                with TemporaryFile() as f:
+                    session.run(
+                        "pyright", "--outputjson", stdout=f, success_codes=[0, 1], external=True
+                    )
+                    f.seek(0)
+                    errors_main = json.load(f)
+                    for errno in errors_main["generalDiagnostics"]:
+                        errortypes_main[errno["rule"]] += 1
+                        errorfiles_main[
+                            str(Path(errno["file"]).relative_to(Path(".").resolve()))
+                        ] += 1
+
+    session.run("pyright", success_codes=[0, 1], external=True)
+
+    # human readable tables
+    t = PrettyTable(["Error", "Count", "Change"][: (2 if simple else 3)])
+    for errtype, num in sorted(errortypes.items(), key=lambda x: x[1], reverse=True):
+        t.add_row([errtype, num, num - errortypes_main[errtype]][: (2 if simple else 3)])
+    print(t)
+
+    Failure = False
+
+    t = PrettyTable(["File", "Errors", "Change"][: (2 if simple else 3)])
+    for errtype, num in sorted(errorfiles.items(), key=lambda x: x[1], reverse=True):
+        t.add_row([errtype, num, num - errorfiles_main[errtype]][: (2 if simple else 3)])
+        if num - errorfiles_main[errtype] > 0 and not simple:
+            Failure = True
+    print(t)
+    if Failure:
+        raise CommandFailed()
