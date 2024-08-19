@@ -7,6 +7,7 @@ import shutil
 from collections import defaultdict
 from pathlib import Path, PurePath
 from tempfile import TemporaryDirectory, TemporaryFile
+from typing import Dict, List, Tuple
 
 import nox
 from nox.command import CommandFailed
@@ -122,7 +123,7 @@ def _install_test(session: nox.Session) -> None:
 
 
 @nox.session
-def doc_gen(session) -> None:
+def doc_gen(session: nox.Session) -> None:
     session.install(".[docs]")
     session.run("make", "-C", "docs", "html", external=True)
     session.run("make", "-C", "docs", "latexpdf", external=True)
@@ -134,7 +135,7 @@ def pyright_check(session: nox.Session) -> None:
     session.install(".[topwrap-parse]")
     from prettytable import PrettyTable
 
-    simple = "compare" not in session.posargs
+    compare_with_main = "compare" in session.posargs
 
     # counting down errors on branch
     errortypes = defaultdict(int)
@@ -149,36 +150,20 @@ def pyright_check(session: nox.Session) -> None:
             errortypes[errno["rule"]] += 1
             errorfiles[str(Path(errno["file"]).relative_to(Path(".").resolve()))] += 1
 
-    if not simple:
-        # copy pyproject to use same rules for main check
-        with open("pyproject.toml") as f:
-            pyproject_backup = f.read()
+    if compare_with_main:
+        # save location of used config
+        pyproject_origin = Path(os.getcwd(), "pyproject.toml")
 
         with TemporaryDirectory() as dir:
-            print(f"created temp dir {dir}")
-
-            def copydir(target: Path, source: Path) -> None:
-                for child in source.iterdir():
-                    if child.is_dir():
-                        try:
-                            (target / (child.stem)).mkdir()
-                        except Exception:
-                            print(f"duplicate copy of dir {target / (child.stem)}")
-                        copydir(target / (child.stem), child)
-                    else:
-                        with open(child, "rb") as f:
-                            file = f.read()
-                        with open(target / (child.name), "wb") as f2:
-                            f2.write(file)
-
             # copy into temp dir and go into it
-            copydir(Path(dir), Path("."))
+            dir = dir / Path("target")
+            shutil.copytree(Path("."), dir)
+
             with session.chdir(Path(dir)):
-                # switch to main and replace pyprojest
+                # switch to main and replace pyproject
                 session.run("git", "switch", "main", "--force", external=True)
                 session.run("rm", "pyproject.toml", external=True)
-                with open("pyproject.toml", "w") as f:
-                    f.write(pyproject_backup)
+                shutil.copy(pyproject_origin, dir)
 
                 # counting down errors on main
                 with TemporaryFile() as f:
@@ -195,19 +180,42 @@ def pyright_check(session: nox.Session) -> None:
 
     session.run("pyright", success_codes=[0, 1], external=True)
 
+    def make_table(
+        top: List[str], compare: bool, errtypes: Dict[str, int], errtypes_main: Dict[str, int]
+    ) -> Tuple[PrettyTable, bool]:
+        t = PrettyTable(top[: (3 if compare else 2)])
+        Failure = False
+        for errtype, num in sorted(errtypes.items(), key=lambda x: x[1], reverse=True):
+            t.add_row([errtype, num, num - errtypes_main[errtype]][: (3 if compare else 2)])
+            if compare and (num - errtypes_main[errtype] > 0):
+                Failure = True
+        return (t, Failure)
+
     # human readable tables
-    t = PrettyTable(["Error", "Count", "Change"][: (2 if simple else 3)])
-    for errtype, num in sorted(errortypes.items(), key=lambda x: x[1], reverse=True):
-        t.add_row([errtype, num, num - errortypes_main[errtype]][: (2 if simple else 3)])
+    t, _ = make_table(["Error", "Count", "Change"], compare_with_main, errortypes, errortypes_main)
     print(t)
-
-    Failure = False
-
-    t = PrettyTable(["File", "Errors", "Change"][: (2 if simple else 3)])
-    for errtype, num in sorted(errorfiles.items(), key=lambda x: x[1], reverse=True):
-        t.add_row([errtype, num, num - errorfiles_main[errtype]][: (2 if simple else 3)])
-        if num - errorfiles_main[errtype] > 0 and not simple:
-            Failure = True
+    t, Failure = make_table(
+        ["File", "Errors", "Change"], compare_with_main, errorfiles, errorfiles_main
+    )
     print(t)
     if Failure:
         raise CommandFailed()
+
+    # human readable tables
+
+
+#    t = PrettyTable(["Error", "Count", "Change"][: (3 if compare_with_main else 2)])
+#    for errtype, num in sorted(errortypes.items(), key=lambda x: x[1], reverse=True):
+#        t.add_row([errtype, num, num - errortypes_main[errtype]][: (3 if compare_with_main else 2)])
+#    print(t)
+
+#    Failure = False
+
+#    t = PrettyTable(["File", "Errors", "Change"][: (3 if compare_with_main else 2)])
+#    for errtype, num in sorted(errorfiles.items(), key=lambda x: x[1], reverse=True):
+#        t.add_row([errtype, num, num - errorfiles_main[errtype]][: (3 if compare_with_main else 2)])
+#        if num - errorfiles_main[errtype] > 0 and compare_with_main:
+#            Failure = True
+#    print(t)
+#    if Failure:
+#        raise CommandFailed()
