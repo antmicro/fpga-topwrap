@@ -7,7 +7,7 @@ import shutil
 from collections import defaultdict
 from pathlib import Path, PurePath
 from tempfile import TemporaryDirectory, TemporaryFile
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import nox
 from nox.command import CommandFailed
@@ -138,27 +138,29 @@ def pyright_check(session: nox.Session) -> None:
     compare_with_main = "compare" in session.posargs
 
     # counting down errors on branch
-    errortypes = defaultdict(int)
-    errorfiles = defaultdict(int)
+    def count_down_errors() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        errortypes = defaultdict(int)
+        errorfiles = defaultdict(int)
+        with TemporaryFile() as f:
+            session.run("pyright", "--outputjson", stdout=f, success_codes=[0, 1], external=True)
+            f.seek(0)
+            errors_data = json.load(f)
+            for errno in errors_data["generalDiagnostics"]:
+                errortypes[errno["rule"]] += 1
+                errorfiles[str(Path(errno["file"]).relative_to(Path(".").resolve()))] += 1
+        return (errortypes, errorfiles)
+
+    errortypes, errorfiles = count_down_errors()
+
     errortypes_main = defaultdict(int)
     errorfiles_main = defaultdict(int)
-    with TemporaryFile() as f:
-        session.run("pyright", "--outputjson", stdout=f, success_codes=[0, 1], external=True)
-        f.seek(0)
-        errors_data = json.load(f)
-        for errno in errors_data["generalDiagnostics"]:
-            errortypes[errno["rule"]] += 1
-            errorfiles[str(Path(errno["file"]).relative_to(Path(".").resolve()))] += 1
-
     if compare_with_main:
         # save location of used config
         pyproject_origin = Path(os.getcwd(), "pyproject.toml")
 
         with TemporaryDirectory() as dir:
             # copy into temp dir and go into it
-            dir = dir / Path("target")
-            shutil.copytree(Path("."), dir)
-
+            shutil.copytree(Path("."), dir, dirs_exist_ok=True)
             with session.chdir(Path(dir)):
                 # switch to main and replace pyproject
                 session.run("git", "switch", "main", "--force", external=True)
@@ -166,56 +168,25 @@ def pyright_check(session: nox.Session) -> None:
                 shutil.copy(pyproject_origin, dir)
 
                 # counting down errors on main
-                with TemporaryFile() as f:
-                    session.run(
-                        "pyright", "--outputjson", stdout=f, success_codes=[0, 1], external=True
-                    )
-                    f.seek(0)
-                    errors_main = json.load(f)
-                    for errno in errors_main["generalDiagnostics"]:
-                        errortypes_main[errno["rule"]] += 1
-                        errorfiles_main[
-                            str(Path(errno["file"]).relative_to(Path(".").resolve()))
-                        ] += 1
+                errortypes_main, errorfiles_main = count_down_errors()
 
+    # human readable pyright output
     session.run("pyright", success_codes=[0, 1], external=True)
 
+    # human readable tables
     def make_table(
-        top: List[str], compare: bool, errtypes: Dict[str, int], errtypes_main: Dict[str, int]
-    ) -> Tuple[PrettyTable, bool]:
-        t = PrettyTable(top[: (3 if compare else 2)])
-        Failure = False
+        header: List[str], columns: int, errtypes: Dict[str, int], errtypes_main: Dict[str, int]
+    ) -> PrettyTable:
+        t = PrettyTable(header[:columns])
         for errtype, num in sorted(errtypes.items(), key=lambda x: x[1], reverse=True):
-            t.add_row([errtype, num, num - errtypes_main[errtype]][: (3 if compare else 2)])
-            if compare and (num - errtypes_main[errtype] > 0):
-                Failure = True
-        return (t, Failure)
+            t.add_row([errtype, num, num - errtypes_main[errtype]][:columns])
+        return t
 
-    # human readable tables
-    t, _ = make_table(["Error", "Count", "Change"], compare_with_main, errortypes, errortypes_main)
-    print(t)
-    t, Failure = make_table(
-        ["File", "Errors", "Change"], compare_with_main, errorfiles, errorfiles_main
-    )
-    print(t)
-    if Failure:
-        raise CommandFailed()
+    columns = 3 if compare_with_main else 2
+    print(make_table(["Error", "Count", "Change"], columns, errortypes, errortypes_main))
+    print(make_table(["File", "Errors", "Change"], columns, errorfiles, errorfiles_main))
 
-    # human readable tables
-
-
-#    t = PrettyTable(["Error", "Count", "Change"][: (3 if compare_with_main else 2)])
-#    for errtype, num in sorted(errortypes.items(), key=lambda x: x[1], reverse=True):
-#        t.add_row([errtype, num, num - errortypes_main[errtype]][: (3 if compare_with_main else 2)])
-#    print(t)
-
-#    Failure = False
-
-#    t = PrettyTable(["File", "Errors", "Change"][: (3 if compare_with_main else 2)])
-#    for errtype, num in sorted(errorfiles.items(), key=lambda x: x[1], reverse=True):
-#        t.add_row([errtype, num, num - errorfiles_main[errtype]][: (3 if compare_with_main else 2)])
-#        if num - errorfiles_main[errtype] > 0 and compare_with_main:
-#            Failure = True
-#    print(t)
-#    if Failure:
-#        raise CommandFailed()
+    if compare_with_main:
+        for errtype, num in errorfiles.items():
+            if num - errorfiles_main[errtype] > 0:
+                raise CommandFailed()
